@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-import click
 
 
 STUB_DIRS = [
@@ -29,11 +28,12 @@ __pycache__/
 
 README_TEMPLATE = """# {name}
 
-**PI:** {pi_name} ({pi_orcid})  
-**Domain:** {domain}  
-**SCE Tier:** {sce_tier}  
-**Version:** {version}  
-**Status:** {validation_status}  
+**PI:** {pi_name} ({identifier})
+**Role:** {pi_role}
+**Domain:** {domain}
+**SCE Tier:** {sce_tier}
+**Version:** {version}
+**Status:** {validation_status}
 
 ## Description
 
@@ -54,7 +54,6 @@ README_TEMPLATE = """# {name}
 
 def init(
     pi_name: str,
-    pi_orcid: str,
     pi_email: str,
     department: str,
     phenotype_name: str,
@@ -67,17 +66,18 @@ def init(
     description: str,
     inclusion_criteria: str,
     exclusion_criteria: str,
+    pi_orcid: str | None = None,
+    staff_id: str | None = None,
+    pi_role: str = "researcher",
     irb_number: str | None = None,
     irb_status: str | None = None,
     funding_source: str | None = None,
     output_dir: Path | None = None,
 ) -> Path:
-    """
-    Initialize a new CRIO phenotype project.
-    Creates the stub directory structure and advocate-phenotype.yaml.
-    Returns the project directory path.
-    """
+    if not pi_orcid and not staff_id:
+        raise ValueError("Must provide either pi_orcid or staff_id")
 
+    identifier = pi_orcid or staff_id
     project_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -89,8 +89,10 @@ def init(
         },
         "investigator": {
             "pi_name": pi_name,
-            "pi_orcid": pi_orcid,
             "pi_email": pi_email,
+            "pi_role": pi_role,
+            "pi_orcid": pi_orcid,
+            "staff_id": staff_id,
             "contributors": [],
         },
         "institution": {
@@ -137,28 +139,23 @@ def init(
         },
     }
 
-    # project dir named by UUID
     project_dir = Path(output_dir or Path.cwd()) / project_id
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    # stub subdirectories
     for stub in STUB_DIRS:
         (project_dir / stub).mkdir(parents=True, exist_ok=True)
 
-    # advocate-phenotype.yaml
-    schema_path = project_dir / "advocate-phenotype.yaml"
-    with open(schema_path, "w") as f:
+    with open(project_dir / "advocate-phenotype.yaml", "w") as f:
         yaml.dump(schema, f, default_flow_style=False, sort_keys=False)
 
-    # .gitignore
     with open(project_dir / ".gitignore", "w") as f:
         f.write(GITIGNORE_CONTENT)
 
-    # README.md
     readme = README_TEMPLATE.format(
         name=phenotype_name,
         pi_name=pi_name,
-        pi_orcid=pi_orcid,
+        identifier=identifier,
+        pi_role=pi_role,
         domain=domain,
         sce_tier=sce_tier,
         version="0.1.0",

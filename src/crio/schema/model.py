@@ -35,6 +35,14 @@ class IRBStatus(str, Enum):
     pending = "pending"
 
 
+class ContributorRole(str, Enum):
+    researcher        = "researcher"
+    clinical_ops      = "clinical_ops"
+    data_scientist    = "data_scientist"
+    quality_analyst   = "quality_analyst"
+    informaticist     = "informaticist"
+
+
 class PhenotypeDomain(str, Enum):
     condition   = "condition"
     drug        = "drug"
@@ -58,8 +66,10 @@ class ValidationMethod(str, Enum):
 
 
 class Contributor(BaseModel):
-    name:  str
-    orcid: Optional[str] = None
+    name:    str
+    orcid:   Optional[str] = None
+    staff_id: Optional[str] = None
+    role:    Optional[ContributorRole] = None
 
     @field_validator("orcid")
     @classmethod
@@ -67,6 +77,14 @@ class Contributor(BaseModel):
         if v and not re.match(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$", v):
             raise ValueError("ORCID must match format 0000-0000-0000-0000")
         return v
+
+    @model_validator(mode="after")
+    def requires_one_identifier(self):
+        if not self.orcid and not self.staff_id:
+            raise ValueError(
+                "Contributor must have either orcid or staff_id"
+            )
+        return self
 
 
 class ProjectBlock(BaseModel):
@@ -76,15 +94,17 @@ class ProjectBlock(BaseModel):
 
 
 class InvestigatorBlock(BaseModel):
-    pi_name:      str
-    pi_orcid:     str
-    pi_email:     str
+    pi_name:   str
+    pi_email:  str
+    pi_role:   ContributorRole = ContributorRole.researcher
+    pi_orcid:  Optional[str]   = None
+    staff_id:  Optional[str]   = None
     contributors: list[Contributor] = Field(default_factory=list)
 
     @field_validator("pi_orcid")
     @classmethod
     def validate_orcid(cls, v):
-        if not re.match(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$", v):
+        if v and not re.match(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$", v):
             raise ValueError("ORCID must match format 0000-0000-0000-0000")
         return v
 
@@ -102,6 +122,18 @@ class InvestigatorBlock(BaseModel):
                 f"Email must be an institutional address: {allowed}"
             )
         return v
+
+    @model_validator(mode="after")
+    def requires_one_identifier(self):
+        if not self.pi_orcid and not self.staff_id:
+            raise ValueError(
+                "Investigator must have either pi_orcid or staff_id"
+            )
+        return self
+
+    @property
+    def primary_identifier(self) -> str:
+        return self.pi_orcid or self.staff_id
 
 
 class InstitutionBlock(BaseModel):
@@ -197,7 +229,7 @@ class CRIOSchema(BaseModel):
                 ValidationStatus.internal_validated,
                 ValidationStatus.peer_reviewed,
             )
-            and bool(self.investigator.pi_orcid)
+            and bool(self.investigator.primary_identifier)
             and bool(self.phenotype.description)
             and bool(self.phenotype.inclusion_criteria)
             and bool(self.phenotype.exclusion_criteria)

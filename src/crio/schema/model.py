@@ -95,6 +95,7 @@ class InvestigatorBlock(BaseModel):
             "wakehealth.edu",
             "wfusm.edu",
             "advocatehealth.com",
+            "advocatehealth.org",
         )
         if not any(v.endswith(d) for d in allowed):
             raise ValueError(

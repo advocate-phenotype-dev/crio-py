@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.advocate/
+*.lock
+config/local.*
+.env
+.DS_Store

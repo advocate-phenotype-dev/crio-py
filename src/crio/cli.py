@@ -89,9 +89,9 @@ def validate(project_dir):
 @click.option("--library-dir",  required=True, type=click.Path())
 @click.option("--message", "-m", required=True)
 @click.option("--sandbox/--no-sandbox", default=True)
-def commit(project_dir, library_dir, message, sandbox):
+def publish(project_dir, library_dir, message, sandbox):
     """Validate and commit project to phenotype library."""
-    from crio.commit import commit as _commit
+    from crio.publish import commit as _commit
     _commit(
         project_dir=Path(project_dir),
         library_dir=Path(library_dir),

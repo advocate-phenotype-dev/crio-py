@@ -2,7 +2,7 @@ import tempfile
 import yaml
 from pathlib import Path
 from crio.init import init
-from crio.commit import commit
+from crio.publish import publish
 
 
 def test_commit_sandbox():
@@ -37,7 +37,7 @@ def test_commit_sandbox():
         git.Repo.init(library_dir)
 
         # commit in sandbox mode
-        commit(
+        publish(
             project_dir=project_dir,
             library_dir=library_dir,
             message="Initial commit",

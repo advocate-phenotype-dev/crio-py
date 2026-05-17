@@ -92,7 +92,7 @@ def _update_registry(library_dir: Path, schema: dict) -> None:
         yaml.dump(registry, f, default_flow_style=False, sort_keys=False)
 
 
-def commit(
+def publish(
     project_dir,
     library_dir,
     message: str,

@@ -43,7 +43,7 @@ For local development:
     crio.source(project_dir, sandbox=True)
     report = crio.validate(project_dir)
     report.print_report()
-    crio.commit(project_dir=project_dir, library_dir="../phenotype-library", message="v0.1", sandbox=True)
+    crio.publish(project_dir=project_dir, library_dir="../phenotype-library", message="v0.1", sandbox=True)
     crio.export(project_dir, target="ohdsi_pl")
     crio.deposit(project_dir, sandbox=True)
 
@@ -52,7 +52,7 @@ For local development:
     crio init
     crio validate --project-dir .
     crio source --project-dir .
-    crio commit --project-dir . --library-dir ../phenotype-library -m "Initial commit"
+    crio publish --project-dir . --library-dir ../phenotype-library -m "Initial commit"
     crio export --project-dir . --target ohdsi_pl
     crio deposit --project-dir .
 

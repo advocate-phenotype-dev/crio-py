@@ -39,6 +39,23 @@ def source(
     schema = report.schema
     now = datetime.now(timezone.utc).isoformat()
 
+
+    # ── TRE portal redirect (planned) ──────────────────────────────────────
+    # When this feature is fully implemented, crio.source() will detect
+    # SCE tier 4+ and automatically open the TRE portal in the browser,
+    # pre-populated with the project UUID. For now it warns and continues.
+    if not sandbox and schema.compute.sce_tier.value >= 4:
+        import webbrowser
+        project_id = str(schema.project.id)
+        portal_url = (
+            f"https://tre.advocatehealth.org/projects/{project_id}"
+            f"?source=crio&version={schema.phenotype.version}"
+        )
+        print("\n⚠  SCE tier 4+ detected.")
+        print("   Full TRE portal integration is a planned feature.")
+        print(f"   When live, your browser will open to: {portal_url}")
+        print("   For now: open the TRE portal manually and source from within.\n")
+    # ── end planned feature ─────────────────────────────────────────────────
     if sandbox:
         session = {**SANDBOX_CREDENTIALS}
         session["issued_at"] = now

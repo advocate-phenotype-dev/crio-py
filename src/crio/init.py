@@ -139,7 +139,7 @@ def init(
         },
     }
 
-    project_dir = Path(output_dir or Path.cwd()) / project_id
+    project_dir = Path(output_dir or Path.cwd())
     project_dir.mkdir(parents=True, exist_ok=True)
 
     for stub in STUB_DIRS:
@@ -167,7 +167,6 @@ def init(
     with open(project_dir / "README.md", "w") as f:
         f.write(readme)
 
-    print(f"\n✓ Project initialized at: {project_dir}")
-    print(f"  cd {project_dir}")
-    print(f"  crio source\n")
+    print(f"\n✓ Project initialized · UUID: {project_id}")
+    print(f"  Run: crio source\n")
     return project_dir

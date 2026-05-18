@@ -45,7 +45,9 @@ def test_commit_sandbox():
         )
 
         # verify project landed in library
-        project_id = project_dir.name
+        import yaml
+        schema = yaml.safe_load((project_dir / "advocate-phenotype.yaml").read_text())
+        project_id = schema["project"]["id"]
         assert (library_dir / "projects" / project_id / "advocate-phenotype.yaml").exists()
         assert (library_dir / "registry.yaml").exists()
 

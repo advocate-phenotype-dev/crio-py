@@ -122,6 +122,9 @@ def publish(
         for item in project_dir.iterdir():
             if item.name in (".git", ".venv", "__pycache__", ".advocate"):
                 continue
+            # skip the library directory if it lives inside the project directory
+            if item.resolve() == library_dir.resolve() or str(item.resolve()).startswith(str(library_dir.resolve())):
+                continue
             target = dest / item.name
             if item.is_dir():
                 if target.exists():

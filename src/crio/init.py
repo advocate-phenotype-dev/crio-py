@@ -167,4 +167,7 @@ def init(
     with open(project_dir / "README.md", "w") as f:
         f.write(readme)
 
+    print(f"\n✓ Project initialized at: {project_dir}")
+    print(f"  cd {project_dir}")
+    print(f"  crio source\n")
     return project_dir

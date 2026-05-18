@@ -20,13 +20,25 @@ SANDBOX_CREDENTIALS = {
 }
 
 
+
+def _find_project_root(start: Path) -> Path:
+    """Walk upward from start until advocate-phenotype.yaml is found."""
+    current = start.resolve()
+    for parent in [current] + list(current.parents):
+        if (parent / "advocate-phenotype.yaml").exists():
+            return parent
+    raise FileNotFoundError(
+        f"No advocate-phenotype.yaml found in {start} or any parent directory. "
+        "Run crio init to create a project, then cd into the project directory."
+    )
+
 def source(
     project_dir: "Path | str | None" = None,
     sandbox: bool = True,
 ) -> dict:
     from crio.validate import validate
 
-    project_dir = Path(project_dir or Path.cwd())
+    project_dir = _find_project_root(Path(project_dir) if project_dir else Path.cwd())
     advocate_dir = project_dir / ADVOCATE_DIR
     advocate_dir.mkdir(exist_ok=True)
 

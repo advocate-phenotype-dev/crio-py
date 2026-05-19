@@ -11,41 +11,202 @@ def main():
     pass
 
 
+def _infer_sce_tier() -> tuple[int, str, bool, bool, str | None]:
+    click.echo()
+    click.echo(click.style("── Data access ──────────────────────────────", fg="white"))
+
+    identified = click.confirm(
+        click.style("  Does this project use identified patient records?", fg="white"),
+        default=False,
+    )
+
+    if not identified:
+        uses_ehr = click.confirm(
+            click.style("  Does it query EHR or OMOP data (e.g. NEXUS)?", fg="white"),
+            default=True,
+        )
+        if not uses_ehr:
+            sce_tier    = 2
+            data_tier   = "A"
+            omop        = click.confirm("  Is it OMOP-aligned?", default=True)
+            clarity     = False
+            environment = "gcp"
+        else:
+            sce_tier    = 3
+            data_tier   = "B"
+            omop        = True
+            clarity     = False
+            environment = "azure_tre"
+    else:
+        unstructured = click.confirm(
+            click.style(
+                "  Does it require unstructured notes, Clarity direct, or CUI-regulated data?",
+                fg="white",
+            ),
+            default=False,
+        )
+        if unstructured:
+            sce_tier    = 5
+            data_tier   = "D"
+            omop        = False
+            clarity     = True
+            environment = "azure_tre"
+        else:
+            sce_tier    = 4
+            data_tier   = "C"
+            omop        = click.confirm("  Is it OMOP-aligned?", default=True)
+            clarity     = False
+            environment = "azure_tre"
+
+    tier_labels = {
+        1: "public / no restriction",
+        2: "de-identified · genomics / ML",
+        3: "OMOP · limited dataset · NEXUS",
+        4: "identified PHI · structured",
+        5: "CUI / FISMA · unstructured PHI",
+    }
+    click.echo()
+    click.echo(
+        click.style(f"→ SCE Tier {sce_tier}", fg="cyan", bold=True)
+        + click.style(f"  {tier_labels[sce_tier]}", fg="white")
+    )
+    click.echo(
+        click.style(f"→ Data class {data_tier}", fg="cyan", bold=True)
+        + click.style(f"  environment: {environment}", fg="white")
+    )
+
+    override_raw = click.prompt(
+        click.style(
+            "  Override SCE tier? [enter to accept, or type 1–5]",
+            fg="white",
+        ),
+        default="",
+        show_default=False,
+    ).strip()
+
+    if override_raw in {"1", "2", "3", "4", "5"}:
+        sce_tier = int(override_raw)
+        click.echo(click.style(f"  SCE tier overridden to {sce_tier}", fg="yellow"))
+
+    return sce_tier, data_tier, omop, clarity, environment
+
+
+def _infer_irb(sce_tier: int) -> tuple[str | None, str | None, bool]:
+    click.echo()
+    click.echo(click.style("── Governance ───────────────────────────────", fg="white"))
+
+    is_research = click.confirm(
+        click.style(
+            "  Is this a research project (vs. operational / quality analytics)?",
+            fg="white",
+        ),
+        default=False,
+    )
+
+    if not is_research:
+        click.echo(click.style("→ Operational pathway — no IRB required", fg="cyan"))
+        return None, None, False
+
+    if sce_tier >= 3:
+        click.echo(
+            click.style(f"→ Research at SCE tier {sce_tier} — IRB required", fg="cyan")
+        )
+        irb_number = click.prompt(click.style("  IRB number", fg="white"))
+        irb_status = click.prompt(
+            click.style("  IRB status", fg="white"),
+            type=click.Choice(["active", "exempt", "pending"]),
+            default="active",
+        )
+        return irb_number, irb_status, True
+
+    click.echo(
+        click.style(f"→ Research at SCE tier {sce_tier} — IRB recommended but not enforced", fg="yellow")
+    )
+    irb_number = click.prompt(
+        click.style("  IRB number (or leave blank)", fg="white"),
+        default="",
+    ).strip() or None
+    irb_status = "active" if irb_number else None
+    return irb_number, irb_status, bool(irb_number)
+
+
 @main.command()
-@click.option("--pi-name",            prompt="PI full name")
-@click.option("--pi-orcid",           prompt="PI ORCID (0000-0000-0000-0000)")
-@click.option("--pi-email",           prompt="PI institutional email")
-@click.option("--department",         prompt="Department")
-@click.option("--phenotype-name",     prompt="Phenotype name")
-@click.option("--domain",             prompt="Domain",
-              type=click.Choice(["condition","drug","procedure","measurement","observation"]))
-@click.option("--sce-tier",           prompt="SCE tier (1-5)", type=int)
-@click.option("--data-tier",          prompt="Data tier",
-              type=click.Choice(["A","B","C","D"]))
-@click.option("--environment",        prompt="Environment",
-              type=click.Choice(["azure_tre","gcp","local"]))
-@click.option("--omop-aligned",       prompt="OMOP aligned?", type=bool)
-@click.option("--clarity-required",   prompt="Clarity direct access required?", type=bool)
-@click.option("--description",        prompt="Clinical description (2-5 sentences)")
-@click.option("--inclusion-criteria", prompt="Inclusion criteria")
-@click.option("--exclusion-criteria", prompt="Exclusion criteria")
-@click.option("--irb-number",         default=None)
-@click.option("--irb-status",         default=None,
-              type=click.Choice(["active","exempt","pending"]))
-@click.option("--funding-source",     default=None)
-@click.option("--output-dir",         default=".", type=click.Path())
-def init(pi_name, pi_orcid, pi_email, department, phenotype_name,
-         domain, sce_tier, data_tier, environment, omop_aligned,
-         clarity_required, description, inclusion_criteria,
-         exclusion_criteria, irb_number, irb_status,
-         funding_source, output_dir):
-    """Initialize a new phenotype project."""
+@click.option("--output-dir", default=".", type=click.Path())
+def init(output_dir):
+    """Initialize a new phenotype project (interactive)."""
     from crio.init import init as _init
 
-    project_dir = _init(
+    click.echo()
+    click.echo(click.style("CRIO · Advocate Health Research Informatics", fg="cyan", bold=True))
+    click.echo(click.style("New phenotype project", fg="white"))
+    click.echo()
+
+    click.echo(click.style("── Investigator ─────────────────────────────", fg="white"))
+    pi_name  = click.prompt(click.style("  Full name",            fg="white"))
+    pi_email = click.prompt(click.style("  Institutional email",  fg="white"))
+    department = click.prompt(click.style("  Department",         fg="white"))
+
+    click.echo()
+    has_orcid = click.confirm(
+        click.style("  Do you have an ORCID iD?", fg="white"), default=True
+    )
+    pi_orcid = None
+    staff_id = None
+    if has_orcid:
+        pi_orcid = click.prompt(click.style("  ORCID (0000-0000-0000-0000)", fg="white"))
+        pi_role  = click.prompt(
+            click.style("  Role", fg="white"),
+            type=click.Choice(["researcher","informaticist","data_scientist","quality_analyst","clinical_ops"]),
+            default="researcher",
+        )
+    else:
+        staff_id = click.prompt(click.style("  Advocate staff ID", fg="white"))
+        pi_role  = click.prompt(
+            click.style("  Role", fg="white"),
+            type=click.Choice(["researcher","informaticist","data_scientist","quality_analyst","clinical_ops"]),
+            default="data_scientist",
+        )
+
+    click.echo()
+    click.echo(click.style("── Phenotype ────────────────────────────────", fg="white"))
+    phenotype_name     = click.prompt(click.style("  Phenotype name",                    fg="white"))
+    domain             = click.prompt(
+        click.style("  Domain", fg="white"),
+        type=click.Choice(["condition","drug","procedure","measurement","observation"]),
+    )
+    description        = click.prompt(click.style("  Clinical description (2–5 sentences)", fg="white"))
+    inclusion_criteria = click.prompt(click.style("  Inclusion criteria",                fg="white"))
+    exclusion_criteria = click.prompt(click.style("  Exclusion criteria",                fg="white"), default="none")
+
+    sce_tier, data_tier, omop_aligned, clarity_required, environment = _infer_sce_tier()
+    irb_number, irb_status, _ = _infer_irb(sce_tier)
+
+    click.echo()
+    funding_source = click.prompt(
+        click.style("── Funding source (grant number or sponsor, or leave blank)", fg="white"),
+        default="",
+    ).strip() or None
+
+    click.echo()
+    click.echo(click.style("── Summary ──────────────────────────────────", fg="white"))
+    click.echo(f"  Investigator  {pi_name}  ·  {pi_email}")
+    click.echo(f"  Identifier    {'ORCID ' + pi_orcid if pi_orcid else 'Staff ID ' + staff_id}")
+    click.echo(f"  Phenotype     {phenotype_name}  ·  {domain}")
+    click.echo(f"  SCE tier      {sce_tier}  ·  data class {data_tier}  ·  {environment}")
+    click.echo(f"  IRB           {irb_number or 'not required'}")
+    click.echo()
+
+    if not click.confirm(click.style("  Initialize project?", fg="white"), default=True):
+        click.echo("Aborted.")
+        raise SystemExit(0)
+
+    click.echo()
+    _init(
         pi_name=pi_name,
         pi_orcid=pi_orcid,
         pi_email=pi_email,
+        staff_id=staff_id,
+        pi_role=pi_role,
         department=department,
         phenotype_name=phenotype_name,
         domain=domain,
@@ -62,7 +223,6 @@ def init(pi_name, pi_orcid, pi_email, department, phenotype_name,
         funding_source=funding_source,
         output_dir=Path(output_dir),
     )
-    click.echo(f"✓ Project initialized at: {project_dir}")
 
 
 @main.command()
@@ -71,7 +231,11 @@ def init(pi_name, pi_orcid, pi_email, department, phenotype_name,
 def source(project_dir, sandbox):
     """Start a working session for a project."""
     from crio.source import source as _source
-    _source(project_dir=Path(project_dir), sandbox=sandbox)
+    try:
+        _source(project_dir=Path(project_dir) if project_dir else None, sandbox=sandbox)
+    except FileNotFoundError as e:
+        click.echo(f"\n✗ {e}\n")
+        raise SystemExit(1)
 
 
 @main.command()
@@ -90,9 +254,9 @@ def validate(project_dir):
 @click.option("--message", "-m", required=True)
 @click.option("--sandbox/--no-sandbox", default=True)
 def publish(project_dir, library_dir, message, sandbox):
-    """Validate and commit project to phenotype library."""
-    from crio.publish import commit as _commit
-    _commit(
+    """Validate and publish project to phenotype library."""
+    from crio.publish import publish as _publish
+    _publish(
         project_dir=Path(project_dir),
         library_dir=Path(library_dir),
         message=message,
@@ -113,7 +277,7 @@ def deposit(project_dir, sandbox):
 @main.command()
 @click.option("--project-dir", default=".", type=click.Path())
 @click.option("--target", default="ohdsi_pl",
-              type=click.Choice(["ohdsi_pl","phekb"]))
+              type=click.Choice(["ohdsi_pl", "phekb", "ncct_trial_ready"]))
 def export(project_dir, target):
     """Export phenotype metadata to external registry format."""
     from crio.export import export as _export

@@ -143,7 +143,17 @@ def init(output_dir):
 
     click.echo(click.style("── Investigator ─────────────────────────────", fg="white"))
     pi_name  = click.prompt(click.style("  Full name",            fg="white"))
-    pi_email = click.prompt(click.style("  Institutional email",  fg="white"))
+    VALID_DOMAINS = {"wakehealth.edu", "wfusm.edu", "advocatehealth.com", "advocatehealth.org"}
+    while True:
+        pi_email = click.prompt(click.style("  Institutional email", fg="white"))
+        domain = pi_email.split("@")[-1].lower() if "@" in pi_email else ""
+        if domain in VALID_DOMAINS:
+            break
+        click.echo(click.style(
+            f"  ✗ {pi_email} is not an institutional address. "
+            f"Must end in: {', '.join(sorted(VALID_DOMAINS))}",
+            fg="red"
+        ))
     department = click.prompt(click.style("  Department",         fg="white"))
 
     click.echo()

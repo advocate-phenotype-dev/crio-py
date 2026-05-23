@@ -8,6 +8,90 @@ from pathlib import Path
 import yaml
 
 
+DEFAULT_REGISTRY_PATH = (
+    Path.home() / "Documents" / "code" / "crio-dev" / "phenotype-library" / "registry.yaml"
+)
+
+
+def _load_upstream(phenotype_uuid: str, registry_path: Path | None = None) -> dict:
+    """Load upstream phenotype data from registry and project YAML.
+
+    Returns a dict with: phenotype_name, version, pi_name, domain,
+    omop_aligned, clarity_required, sce_tier, data_tier, environment,
+    inclusion_criteria, exclusion_criteria, ppv, validation_status.
+
+    Raises FileNotFoundError if registry_path does not exist.
+    Raises ValueError if the UUID is not found in the registry.
+    """
+    if registry_path is None:
+        registry_path = DEFAULT_REGISTRY_PATH
+
+    if not registry_path.exists():
+        raise FileNotFoundError(
+            f"Registry not found at {registry_path}"
+        )
+
+    with open(registry_path) as f:
+        registry = yaml.safe_load(f)
+
+    projects = registry.get("projects", []) or []
+    entry = next(
+        (p for p in projects if str(p.get("id")) == phenotype_uuid),
+        None,
+    )
+
+    if entry is None:
+        raise ValueError(
+            f"UUID {phenotype_uuid} not found in registry. "
+            "Use 'crio init' without --derive-from to start a new project."
+        )
+
+    project_yaml_path = (
+        registry_path.parent / "projects" / phenotype_uuid / "advocate-phenotype.yaml"
+    )
+
+    if not project_yaml_path.exists():
+        # Registry-only fallback — limited fields
+        return {
+            "phenotype_name": entry.get("phenotype_name"),
+            "version":        None,
+            "pi_name":        entry.get("pi_name"),
+            "domain":         entry.get("domain"),
+            "omop_aligned":   None,
+            "clarity_required": None,
+            "sce_tier":       entry.get("sce_tier"),
+            "data_tier":      None,
+            "environment":    None,
+            "inclusion_criteria": None,
+            "exclusion_criteria": None,
+            "ppv":            None,
+            "validation_status": entry.get("validation_status"),
+        }
+
+    with open(project_yaml_path) as f:
+        schema = yaml.safe_load(f)
+
+    phenotype    = schema.get("phenotype", {}) or {}
+    compute      = schema.get("compute", {}) or {}
+    investigator = schema.get("investigator", {}) or {}
+
+    return {
+        "phenotype_name":     phenotype.get("name"),
+        "version":            phenotype.get("version"),
+        "pi_name":            investigator.get("pi_name"),
+        "domain":             phenotype.get("domain"),
+        "omop_aligned":       phenotype.get("omop_aligned"),
+        "clarity_required":   phenotype.get("clarity_required"),
+        "sce_tier":           compute.get("sce_tier"),
+        "data_tier":          compute.get("data_tier"),
+        "environment":        compute.get("environment"),
+        "inclusion_criteria": phenotype.get("inclusion_criteria"),
+        "exclusion_criteria": phenotype.get("exclusion_criteria"),
+        "ppv":                phenotype.get("ppv"),
+        "validation_status":  phenotype.get("validation_status"),
+    }
+
+
 STUB_DIRS = [
     "src/cohort_definition",
     "src/clarity_queries",
@@ -73,6 +157,11 @@ def init(
     irb_status: str | None = None,
     funding_source: str | None = None,
     output_dir: Path | None = None,
+    derived_from: str | None = None,
+    derived_version: str | None = None,
+    derivation_rationale: str | None = None,
+    upstream_inclusion_criteria: str | None = None,
+    upstream_exclusion_criteria: str | None = None,
 ) -> Path:
     if not pi_orcid and not staff_id:
         raise ValueError("Must provide either pi_orcid or staff_id")
@@ -81,12 +170,38 @@ def init(
     project_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
+    project_block: dict = {
+        "id": project_id,
+        "created": now,
+        "updated": now,
+    }
+    if derived_from:
+        project_block["derived_from"] = derived_from
+        project_block["derived_version"] = derived_version
+        project_block["derivation_rationale"] = derivation_rationale
+
+    def _criteria_status(current: str, upstream: str | None) -> str:
+        if upstream is None:
+            return "new"
+        return "inherited" if current == upstream else "modified"
+
+    inherited_criteria = None
+    if derived_from:
+        inherited_criteria = [
+            {
+                "field": "inclusion_criteria",
+                "from_version": derived_version,
+                "status": _criteria_status(inclusion_criteria, upstream_inclusion_criteria),
+            },
+            {
+                "field": "exclusion_criteria",
+                "from_version": derived_version,
+                "status": _criteria_status(exclusion_criteria, upstream_exclusion_criteria),
+            },
+        ]
+
     schema = {
-        "project": {
-            "id": project_id,
-            "created": now,
-            "updated": now,
-        },
+        "project": project_block,
         "investigator": {
             "pi_name": pi_name,
             "pi_email": pi_email,
@@ -125,6 +240,7 @@ def init(
             "ppv": None,
             "phekb_id": None,
             "ohdsi_pl_id": None,
+            "inherited_criteria": inherited_criteria,
         },
         "outputs": {
             "reusable_assets": [],

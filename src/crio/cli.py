@@ -130,31 +130,23 @@ def _infer_irb(sce_tier: int) -> tuple[str | None, str | None, bool]:
     return irb_number, irb_status, bool(irb_number)
 
 
-@main.command()
-@click.option("--output-dir", default=".", type=click.Path())
-def init(output_dir):
-    """Initialize a new phenotype project (interactive)."""
-    from crio.init import init as _init
-
-    click.echo()
-    click.echo(click.style("CRIO · Advocate Health Research Informatics", fg="cyan", bold=True))
-    click.echo(click.style("New phenotype project", fg="white"))
-    click.echo()
+def _collect_investigator() -> tuple[str, str, str, str | None, str | None, str]:
+    """Shared investigator interview. Returns (pi_name, pi_email, department, pi_orcid, staff_id, pi_role)."""
+    VALID_DOMAINS = {"wakehealth.edu", "wfusm.edu", "advocatehealth.com", "advocatehealth.org"}
 
     click.echo(click.style("── Investigator ─────────────────────────────", fg="white"))
-    pi_name  = click.prompt(click.style("  Full name",            fg="white"))
-    VALID_DOMAINS = {"wakehealth.edu", "wfusm.edu", "advocatehealth.com", "advocatehealth.org"}
+    pi_name    = click.prompt(click.style("  Full name",            fg="white"))
     while True:
-        pi_email = click.prompt(click.style("  Institutional email", fg="white"))
-        domain = pi_email.split("@")[-1].lower() if "@" in pi_email else ""
-        if domain in VALID_DOMAINS:
+        pi_email   = click.prompt(click.style("  Institutional email", fg="white"))
+        email_domain = pi_email.split("@")[-1].lower() if "@" in pi_email else ""
+        if email_domain in VALID_DOMAINS:
             break
         click.echo(click.style(
             f"  ✗ {pi_email} is not an institutional address. "
             f"Must end in: {', '.join(sorted(VALID_DOMAINS))}",
-            fg="red"
+            fg="red",
         ))
-    department = click.prompt(click.style("  Department",         fg="white"))
+    department = click.prompt(click.style("  Department",          fg="white"))
 
     click.echo()
     has_orcid = click.confirm(
@@ -177,33 +169,273 @@ def init(output_dir):
             default="data_scientist",
         )
 
+    return pi_name, pi_email, department, pi_orcid, staff_id, pi_role
+
+
+@main.command()
+@click.option("--output-dir", default=".", type=click.Path())
+@click.option(
+    "--derive-from",
+    default=None,
+    metavar="UUID",
+    help="UUID of upstream phenotype to derive from.",
+)
+def init(output_dir, derive_from):
+    """Initialize a new phenotype project (interactive)."""
+    from crio.init import init as _init, _load_upstream, DEFAULT_REGISTRY_PATH
+
+    tier_labels = {
+        1: "public / no restriction",
+        2: "de-identified · genomics / ML",
+        3: "OMOP · limited dataset · NEXUS",
+        4: "identified PHI · structured",
+        5: "CUI / FISMA · unstructured PHI",
+    }
+
+    # ── Load upstream if --derive-from was given ──────────────────────────
+    upstream: dict | None = None
+    if derive_from:
+        try:
+            upstream = _load_upstream(derive_from, DEFAULT_REGISTRY_PATH)
+        except FileNotFoundError:
+            click.echo(click.style(
+                "  ! Registry not available locally — "
+                "set up phenotype-library at ~/Documents/code/crio-dev/phenotype-library",
+                fg="yellow",
+            ))
+            if not click.confirm("  Proceed without upstream pre-population?", default=True):
+                click.echo("Aborted.")
+                raise SystemExit(0)
+            upstream = {}
+        except ValueError as exc:
+            click.echo(click.style(f"\n  ✗ {exc}\n", fg="red"))
+            raise SystemExit(1)
+
+    # ── Banner ────────────────────────────────────────────────────────────
+    click.echo()
+    click.echo(click.style("CRIO · Advocate Health Research Informatics", fg="cyan", bold=True))
+    if derive_from:
+        click.echo(click.style("Derived project — building on existing institutional work", fg="white"))
+        click.echo()
+
+        if upstream:
+            ppv_str = (
+                f"PPV {upstream['ppv'] * 100:.1f}%"
+                if upstream.get("ppv") is not None
+                else ""
+            )
+            line1 = (upstream.get("phenotype_name") or "Unknown")[:51]
+            parts = [upstream.get("pi_name") or "Unknown", f"v{upstream.get('version') or '?'}"]
+            if ppv_str:
+                parts.append(ppv_str)
+            line2 = "  ·  ".join(parts)[:51]
+            line3 = f"UUID: {derive_from}"[:51]
+
+            click.echo(f"  ┌{'─' * 55}┐")
+            click.echo(f"  │  {line1:<51}  │")
+            click.echo(f"  │  {line2:<51}  │")
+            click.echo(f"  │  {line3:<51}  │")
+            click.echo(f"  └{'─' * 55}┘")
+            click.echo()
+
+        click.echo(click.style(
+            "  Fields inherited: domain · omop_aligned · clarity_required · environment",
+            fg="white",
+        ))
+        click.echo(click.style(
+            "  You will be asked to confirm or modify each inherited field.",
+            fg="white",
+        ))
+    else:
+        click.echo(click.style("New phenotype project", fg="white"))
+    click.echo()
+
+    # ── Investigator (shared) ─────────────────────────────────────────────
+    pi_name, pi_email, department, pi_orcid, staff_id, pi_role = _collect_investigator()
+
+    # ── Phenotype ─────────────────────────────────────────────────────────
     click.echo()
     click.echo(click.style("── Phenotype ────────────────────────────────", fg="white"))
-    phenotype_name     = click.prompt(click.style("  Phenotype name",                    fg="white"))
-    domain             = click.prompt(
-        click.style("  Domain", fg="white"),
-        type=click.Choice(["condition","drug","procedure","measurement","observation"]),
-    )
-    description        = click.prompt(click.style("  Clinical description (2–5 sentences)", fg="white"))
-    inclusion_criteria = click.prompt(click.style("  Inclusion criteria",                fg="white"))
-    exclusion_criteria = click.prompt(click.style("  Exclusion criteria",                fg="white"), default="none")
+    phenotype_name = click.prompt(click.style("  Phenotype name", fg="white"))
 
-    sce_tier, data_tier, omop_aligned, clarity_required, environment = _infer_sce_tier()
+    derivation_rationale: str | None = None
+    up_inc: str | None = None
+    up_exc: str | None = None
+
+    if derive_from:
+        up = upstream or {}
+
+        # Domain: inherited, no prompt
+        pheno_domain = up.get("domain")
+        if pheno_domain:
+            click.echo(click.style(f"  Domain          {pheno_domain}  [inherited]", fg="white"))
+        else:
+            pheno_domain = click.prompt(
+                click.style("  Domain", fg="white"),
+                type=click.Choice(["condition","drug","procedure","measurement","observation"]),
+            )
+
+        description = click.prompt(click.style("  Clinical description (2–5 sentences)", fg="white"))
+
+        # Inclusion criteria: pre-populate from upstream
+        up_inc = up.get("inclusion_criteria")
+        if up_inc:
+            click.echo(click.style("\n  Upstream inclusion criteria:", fg="white"))
+            preview = up_inc if len(up_inc) <= 300 else up_inc[:300] + "…"
+            for line in preview.splitlines():
+                click.echo(f"    {line}")
+            if click.confirm(click.style("  Keep as-is?", fg="white"), default=True):
+                inclusion_criteria = up_inc
+            else:
+                inclusion_criteria = click.prompt(click.style("  Inclusion criteria", fg="white"))
+        else:
+            inclusion_criteria = click.prompt(click.style("  Inclusion criteria", fg="white"))
+
+        # Exclusion criteria: pre-populate from upstream
+        up_exc = up.get("exclusion_criteria")
+        if up_exc:
+            click.echo(click.style("\n  Upstream exclusion criteria:", fg="white"))
+            preview = up_exc if len(up_exc) <= 300 else up_exc[:300] + "…"
+            for line in preview.splitlines():
+                click.echo(f"    {line}")
+            if click.confirm(click.style("  Keep as-is?", fg="white"), default=True):
+                exclusion_criteria = up_exc
+            else:
+                exclusion_criteria = click.prompt(click.style("  Exclusion criteria", fg="white"))
+        else:
+            exclusion_criteria = click.prompt(
+                click.style("  Exclusion criteria", fg="white"), default="none"
+            )
+
+        click.echo()
+        derivation_rationale = click.prompt(
+            click.style(
+                "  Derivation rationale (why are you deriving from this phenotype?)",
+                fg="white",
+            )
+        )
+
+        # SCE / data tier: show inherited, allow override
+        sce_tier    = up.get("sce_tier") or 3
+        data_tier   = up.get("data_tier") or "B"
+        environment = up.get("environment") or "azure_tre"
+        omop_aligned    = up.get("omop_aligned")
+        clarity_required = up.get("clarity_required")
+
+        click.echo()
+        click.echo(click.style("── Data access ──────────────────────────────", fg="white"))
+        click.echo(
+            click.style(f"→ SCE Tier {sce_tier}", fg="cyan", bold=True)
+            + click.style(f"  {tier_labels.get(sce_tier, '')}", fg="white")
+            + click.style("  [inherited]", fg="yellow")
+        )
+        click.echo(
+            click.style(f"→ Data class {data_tier}", fg="cyan", bold=True)
+            + click.style(f"  environment: {environment}", fg="white")
+            + click.style("  [inherited]", fg="yellow")
+        )
+
+        override_raw = click.prompt(
+            click.style(
+                f"  SCE tier [inherited: {sce_tier}] (enter to accept, or type 1–5)",
+                fg="white",
+            ),
+            default="",
+            show_default=False,
+        ).strip()
+        if override_raw in {"1", "2", "3", "4", "5"}:
+            sce_tier = int(override_raw)
+            click.echo(click.style(f"  SCE tier overridden to {sce_tier}", fg="yellow"))
+
+        override_dt = click.prompt(
+            click.style(
+                f"  Data class [inherited: {data_tier}] (enter to accept, or type A/B/C/D)",
+                fg="white",
+            ),
+            default="",
+            show_default=False,
+        ).strip().upper()
+        if override_dt in {"A", "B", "C", "D"}:
+            data_tier = override_dt
+            click.echo(click.style(f"  Data class overridden to {data_tier}", fg="yellow"))
+
+        if omop_aligned is None:
+            omop_aligned = click.confirm("  Is it OMOP-aligned?", default=True)
+        if clarity_required is None:
+            clarity_required = click.confirm("  Does it require Clarity direct access?", default=False)
+
+    else:
+        # Standard phenotype interview
+        pheno_domain = click.prompt(
+            click.style("  Domain", fg="white"),
+            type=click.Choice(["condition","drug","procedure","measurement","observation"]),
+        )
+        description        = click.prompt(click.style("  Clinical description (2–5 sentences)", fg="white"))
+        inclusion_criteria = click.prompt(click.style("  Inclusion criteria",                fg="white"))
+        exclusion_criteria = click.prompt(click.style("  Exclusion criteria",                fg="white"), default="none")
+
+        sce_tier, data_tier, omop_aligned, clarity_required, environment = _infer_sce_tier()
+
+    # ── Governance (shared) ───────────────────────────────────────────────
     irb_number, irb_status, _ = _infer_irb(sce_tier)
 
+    # ── Funding (shared) ──────────────────────────────────────────────────
     click.echo()
     funding_source = click.prompt(
         click.style("── Funding source (grant number or sponsor, or leave blank)", fg="white"),
         default="",
     ).strip() or None
 
+    # ── Compute inherited vs modified (derived only) ──────────────────────
+    inherited_fields: list[str] = []
+    modified_fields:  list[str] = []
+
+    if derive_from:
+        up = upstream or {}
+        inherited_fields = ["domain", "omop_aligned"]
+        if up.get("clarity_required") is not None:
+            inherited_fields.append("clarity_required")
+
+        if up.get("sce_tier") and sce_tier != up["sce_tier"]:
+            modified_fields.append("sce_tier")
+        elif up.get("sce_tier"):
+            inherited_fields.append("sce_tier")
+
+        if up.get("data_tier") and data_tier != up["data_tier"]:
+            modified_fields.append("data_tier")
+
+        if up_inc is not None:
+            if inclusion_criteria == up_inc:
+                inherited_fields.append("inclusion_criteria")
+            else:
+                modified_fields.append("inclusion_criteria")
+
+        if up_exc is not None:
+            if exclusion_criteria == up_exc:
+                inherited_fields.append("exclusion_criteria")
+            else:
+                modified_fields.append("exclusion_criteria")
+
+    # ── Summary ───────────────────────────────────────────────────────────
     click.echo()
     click.echo(click.style("── Summary ──────────────────────────────────", fg="white"))
     click.echo(f"  Investigator  {pi_name}  ·  {pi_email}")
     click.echo(f"  Identifier    {'ORCID ' + pi_orcid if pi_orcid else 'Staff ID ' + staff_id}")
-    click.echo(f"  Phenotype     {phenotype_name}  ·  {domain}")
+    click.echo(f"  Phenotype     {phenotype_name}  ·  {pheno_domain}")
     click.echo(f"  SCE tier      {sce_tier}  ·  data class {data_tier}  ·  {environment}")
     click.echo(f"  IRB           {irb_number or 'not required'}")
+
+    if derive_from:
+        up = upstream or {}
+        up_name = up.get("phenotype_name") or "unknown"
+        up_ver  = up.get("version") or "?"
+        click.echo(f"  Derives from  {up_name} · v{up_ver}")
+        click.echo(f"  Rationale     {derivation_rationale}")
+        if inherited_fields:
+            click.echo(f"  Inherited     {' · '.join(inherited_fields)}")
+        if modified_fields:
+            click.echo(f"  Modified      {' · '.join(modified_fields)}")
+
     click.echo()
 
     if not click.confirm(click.style("  Initialize project?", fg="white"), default=True):
@@ -219,7 +451,7 @@ def init(output_dir):
         pi_role=pi_role,
         department=department,
         phenotype_name=phenotype_name,
-        domain=domain,
+        domain=pheno_domain,
         sce_tier=sce_tier,
         data_tier=data_tier,
         environment=environment,
@@ -232,6 +464,11 @@ def init(output_dir):
         irb_status=irb_status,
         funding_source=funding_source,
         output_dir=Path(output_dir),
+        derived_from=derive_from,
+        derived_version=(upstream or {}).get("version") if derive_from else None,
+        derivation_rationale=derivation_rationale,
+        upstream_inclusion_criteria=up_inc,
+        upstream_exclusion_criteria=up_exc,
     )
 
 

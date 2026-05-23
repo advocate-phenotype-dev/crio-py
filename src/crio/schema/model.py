@@ -88,9 +88,12 @@ class Contributor(BaseModel):
 
 
 class ProjectBlock(BaseModel):
-    id:      UUID
-    created: datetime
-    updated: datetime
+    id:                   UUID
+    created:              datetime
+    updated:              datetime
+    derived_from:         Optional[str] = None
+    derived_version:      Optional[str] = None
+    derivation_rationale: Optional[str] = None
 
 
 class InvestigatorBlock(BaseModel):
@@ -164,6 +167,7 @@ class PhenotypeBlock(BaseModel):
     ppv:                Optional[float] = Field(None, ge=0.0, le=1.0)
     phekb_id:           Optional[str]   = None
     ohdsi_pl_id:        Optional[str]   = None
+    inherited_criteria: Optional[list]  = None
 
     @model_validator(mode="after")
     def check_conditional_fields(self):

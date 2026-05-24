@@ -472,6 +472,169 @@ def init(output_dir, derive_from):
     )
 
 
+@main.command(name="list")
+@click.option("--domain",    default=None, help="Filter by phenotype domain.")
+@click.option("--status",    default=None, help="Filter by validation status.")
+@click.option("--pi",        default=None, help="Filter by PI name (partial match).")
+@click.option("--search",    default=None, help="Free-text search on name and PI.")
+@click.option("--page-size", default=10,   type=int, show_default=True)
+@click.option("--no-pager",  is_flag=True, default=False,
+              help="Dump all results as plain text (good for piping).")
+def list_cmd(domain, status, pi, search, page_size, no_pager):
+    """Browse phenotypes in the registry."""
+    import shutil
+    from crio.list import (
+        find_registry, load_registry, apply_filters, render_card,
+    )
+
+    # ── Locate registry ───────────────────────────────────────────────────
+    registry_path = find_registry()
+    if registry_path is None:
+        click.echo(click.style(
+            "\n  ✗ Registry not found. Set CRIO_LIBRARY_DIR or clone\n"
+            "    phenotype-library to ~/Documents/code/crio-dev/\n",
+            fg="red",
+        ))
+        raise SystemExit(1)
+
+    # ── Load ──────────────────────────────────────────────────────────────
+    try:
+        projects = load_registry(registry_path)
+    except ValueError as exc:
+        click.echo(click.style(f"\n  ✗ {exc}\n", fg="red"))
+        raise SystemExit(1)
+
+    registry_dir = registry_path.parent
+
+    # ── Filter ────────────────────────────────────────────────────────────
+    filtered = apply_filters(projects, domain=domain, status=status, pi=pi, search=search)
+    active_filters = {"domain": domain, "status": status, "pi": pi, "search": search}
+
+    if not filtered:
+        if projects:
+            click.echo("\n  No phenotypes match your filter.\n")
+        else:
+            click.echo(
+                "\n  No phenotypes in registry yet. Run crio init to create one.\n"
+            )
+        return
+
+    # ── No-pager dump ─────────────────────────────────────────────────────
+    if no_pager:
+        for i, entry in enumerate(filtered, 1):
+            click.echo(render_card(entry, i, len(filtered), registry_dir))
+            click.echo()
+        click.echo(f"  {len(filtered)} phenotype(s)")
+        return
+
+    # ── Interactive pager ─────────────────────────────────────────────────
+    term_cols   = shutil.get_terminal_size((80, 24)).columns
+    narrow      = term_cols < 70
+    total_items = len(filtered)
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    current_page = 1
+
+    while True:
+        click.clear()
+
+        start = (current_page - 1) * page_size
+        end   = start + page_size
+        for i, entry in enumerate(filtered[start:end], start + 1):
+            click.echo(render_card(entry, i, total_items, registry_dir, narrow=narrow))
+            click.echo()
+
+        # Status + navigation bar
+        f_parts = [f"{k}: {v}" for k, v in active_filters.items() if v]
+        f_desc  = f"  [{', '.join(f_parts)}]" if f_parts else ""
+        click.echo(click.style(
+            f"  Page {current_page} of {total_pages}"
+            f"  ·  {total_items} phenotype{'s' if total_items != 1 else ''} total"
+            f"{f_desc}",
+            fg="white",
+        ))
+        click.echo(click.style(
+            f"  [n] next  [p] prev  [1-{total_pages}] jump to page  [f] filter  [q] quit",
+            fg="bright_black",
+        ))
+
+        try:
+            cmd = click.prompt(
+                "",
+                default="",
+                show_default=False,
+                prompt_suffix="  › ",
+            ).strip().lower()
+        except (click.exceptions.Abort, EOFError):
+            break
+
+        if cmd == "q":
+            break
+        elif cmd == "n":
+            if current_page < total_pages:
+                current_page += 1
+        elif cmd == "p":
+            if current_page > 1:
+                current_page -= 1
+        elif cmd == "f":
+            click.echo(click.style(
+                "  Filter by: domain / status / pi / free text", fg="white"
+            ))
+            try:
+                field = click.prompt(
+                    click.style("  [field or search term, blank to clear]", fg="white"),
+                    default="",
+                    show_default=False,
+                ).strip()
+            except (click.exceptions.Abort, EOFError):
+                continue
+
+            if not field:
+                active_filters = {"domain": None, "status": None, "pi": None, "search": None}
+            elif field == "domain":
+                val = click.prompt(
+                    click.style("  Domain", fg="white"),
+                    type=click.Choice([
+                        "condition", "drug", "procedure", "measurement", "observation"
+                    ]),
+                )
+                active_filters["domain"] = val
+            elif field == "status":
+                val = click.prompt(
+                    click.style("  Status", fg="white"),
+                    type=click.Choice([
+                        "draft", "internal_validated", "peer_reviewed", "deprecated"
+                    ]),
+                )
+                active_filters["status"] = val
+            elif field == "pi":
+                val = click.prompt(click.style("  PI name (partial)", fg="white"))
+                active_filters["pi"] = val
+            else:
+                active_filters["search"] = field
+
+            filtered = apply_filters(
+                projects,
+                domain=active_filters.get("domain"),
+                status=active_filters.get("status"),
+                pi=active_filters.get("pi"),
+                search=active_filters.get("search"),
+            )
+            total_items = len(filtered)
+            total_pages = max(1, (total_items + page_size - 1) // page_size)
+            current_page = 1
+
+            if not filtered:
+                click.echo(click.style("  No phenotypes match that filter.", fg="yellow"))
+                try:
+                    click.prompt("  Press enter to continue", default="", show_default=False)
+                except (click.exceptions.Abort, EOFError):
+                    pass
+        elif cmd.isdigit():
+            page_num = int(cmd)
+            if 1 <= page_num <= total_pages:
+                current_page = page_num
+
+
 @main.command()
 @click.option("--project-dir", default=".", type=click.Path())
 @click.option("--sandbox/--no-sandbox", default=True)

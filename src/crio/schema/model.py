@@ -111,15 +111,11 @@ class InvestigatorBlock(BaseModel):
     @field_validator("pi_email")
     @classmethod
     def institutional_email(cls, v):
-        allowed = (
-            "wakehealth.edu",
-            "wfusm.edu",
-            "advocatehealth.com",
-            "advocatehealth.org",
-        )
-        if not any(v.endswith(d) for d in allowed):
+        allowed = {"wakehealth.edu", "wfusm.edu", "advocatehealth.com", "advocatehealth.org"}
+        domain = v.split("@")[-1].lower() if "@" in v else ""
+        if domain not in allowed:
             raise ValueError(
-                f"Email must be an institutional address: {allowed}"
+                f"Email must be an institutional address: {sorted(allowed)}"
             )
         return v
 

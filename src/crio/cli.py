@@ -554,7 +554,7 @@ def list_cmd(domain, status, pi, search, page_size, no_pager):
         ))
         click.echo(click.style(
             f"  [n] next  [p] prev  [1-{total_pages}] jump to page  [f] filter  [q] quit",
-            fg="bright_black",
+            fg="white",
         ))
 
         try:

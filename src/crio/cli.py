@@ -1,7 +1,30 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 import click
 from pathlib import Path
+
+
+def _az_identity() -> dict | None:
+    """Return {'name': ..., 'email': ...} from an active az CLI session, or None."""
+    if not shutil.which("az"):
+        return None
+    try:
+        result = subprocess.run(
+            ["az", "ad", "signed-in-user", "show",
+             "--query", "{name:displayName,email:mail,upn:userPrincipalName}",
+             "--output", "json"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        parsed = json.loads(result.stdout)
+        email = parsed.get("email") or parsed.get("upn")
+        return {"name": parsed.get("name"), "email": email}
+    except Exception:
+        return None
 
 
 @click.group()
@@ -135,9 +158,17 @@ def _collect_investigator() -> tuple[str, str, str, str | None, str | None, str]
     VALID_DOMAINS = {"wakehealth.edu", "wfusm.edu", "advocatehealth.com", "advocatehealth.org"}
 
     click.echo(click.style("── Investigator ─────────────────────────────", fg="white"))
-    pi_name    = click.prompt(click.style("  Full name",            fg="white"))
+    az = _az_identity()
+    if az:
+        click.echo(
+            click.style("  Resolved from Azure SSO: ", fg="cyan")
+            + f"{az['name']} <{az['email']}>"
+        )
+    pi_name  = click.prompt(click.style("  Full name",            fg="white"),
+                            default=az["name"]  if az else None)
     while True:
-        pi_email   = click.prompt(click.style("  Institutional email", fg="white"))
+        pi_email = click.prompt(click.style("  Institutional email", fg="white"),
+                                default=az["email"] if az else None)
         email_domain = pi_email.split("@")[-1].lower() if "@" in pi_email else ""
         if email_domain in VALID_DOMAINS:
             break

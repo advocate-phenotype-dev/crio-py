@@ -13,16 +13,14 @@ def _az_identity() -> dict | None:
         return None
     try:
         result = subprocess.run(
-            ["az", "ad", "signed-in-user", "show",
-             "--query", "{name:displayName,email:mail,upn:userPrincipalName}",
-             "--output", "json"],
+            ["az", "ad", "signed-in-user", "show", "--output", "json"],
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
             return None
         parsed = json.loads(result.stdout)
-        email = parsed.get("email") or parsed.get("upn")
-        return {"name": parsed.get("name"), "email": email}
+        email = parsed.get("mail") or parsed.get("userPrincipalName")
+        return {"name": parsed.get("displayName"), "email": email}
     except Exception:
         return None
 

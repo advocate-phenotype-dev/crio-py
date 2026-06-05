@@ -1,9 +1,32 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _az_token() -> dict | None:
+    """Return {'token': ..., 'expires_at': ..., 'tenant': ...} from an active az session."""
+    if not shutil.which("az"):
+        return None
+    try:
+        result = subprocess.run(
+            ["az", "account", "get-access-token", "--output", "json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        parsed = json.loads(result.stdout)
+        return {
+            "token":      parsed["accessToken"],
+            "expires_at": parsed["expiresOn"],
+            "tenant":     parsed["tenant"],
+        }
+    except Exception:
+        return None
 
 
 ADVOCATE_DIR = ".advocate"
@@ -70,16 +93,28 @@ def source(
     # ── end planned feature ─────────────────────────────────────────────────
     if sandbox:
         session = {**SANDBOX_CREDENTIALS}
-        session["issued_at"] = now
-        session["sce_tier"] = schema.compute.sce_tier.value
+        session["issued_at"]   = now
+        session["sce_tier"]    = schema.compute.sce_tier.value
         session["environment"] = schema.compute.environment.value
-        session["project_id"] = str(schema.project.id)
-        session["pi_orcid"] = schema.investigator.pi_orcid
+        session["project_id"]  = str(schema.project.id)
+        session["pi_orcid"]    = schema.investigator.pi_orcid
     else:
-        raise NotImplementedError(
-            "Production credential endpoint not yet configured. "
-            "Run with sandbox=True for local development."
-        )
+        az_tok = _az_token()
+        if az_tok is None:
+            raise RuntimeError(
+                "No active Azure CLI session. Run `az login` and try again."
+            )
+        session = {
+            "mode":           "production",
+            "sce_tier":       schema.compute.sce_tier.value,
+            "environment":    schema.compute.environment.value,
+            "library_remote": SANDBOX_CREDENTIALS["library_remote"],
+            "token":          az_tok["token"],
+            "issued_at":      now,
+            "expires_at":     az_tok["expires_at"],
+            "project_id":     str(schema.project.id),
+            "pi_orcid":       schema.investigator.pi_orcid,
+        }
 
     lock_path = project_dir / SESSION_LOCK
     with open(lock_path, "w") as f:
